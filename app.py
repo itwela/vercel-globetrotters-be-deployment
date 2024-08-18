@@ -281,31 +281,34 @@ def search_flights(access_token, city_from, city_to, departure_date, return_date
         flight_data = response.json()
 
         parsed_flights = []
-        for offer in flight_data.get('data', []):
-            for itinerary in offer['itineraries']:
-                for segment in itinerary['segments']:
-                    flight_info = {
-                        'flight_number': segment['number'],
-                        'departure_time': segment['departure']['at'],
-                        'arrival_time': segment['arrival']['at'],
-                        'departure_airport': segment['departure']['iataCode'],
-                        'arrival_airport': segment['arrival']['iataCode'],
-                        'cabin': segment.get('cabin', 'N/A'),
-                        'price': offer['price']['total'],
-                        'currency': offer['price']['currency'],
-                        'duration': itinerary['duration'],
-                        'seat_type': segment['aircraft']['code'],
-                        'airline': offer.get('validatingAirlineCodes', ['N/A'])[0],
-                        'amenities': [
-                            {
-                                'type': amenity.get('amenityType', 'Unknown'),
-                                'description': amenity.get('description', 'No description'),
-                                'is_chargeable': amenity.get('isChargeable', False)
-                            }
-                            for amenity in segment.get('fareDetailsBySegment', [{}])[0].get('amenities', [])
-                        ]
+        from itertools import chain
+
+        parsed_flights = [
+            {
+                'flight_number': segment['number'],
+                'departure_time': segment['departure']['at'],
+                'arrival_time': segment['arrival']['at'],
+                'departure_airport': segment['departure']['iataCode'],
+                'arrival_airport': segment['arrival']['iataCode'],
+                'cabin': segment.get('cabin', 'N/A'),
+                'price': offer['price']['total'],
+                'currency': offer['price']['currency'],
+                'duration': itinerary['duration'],
+                'seat_type': segment['aircraft']['code'],
+                'airline': offer.get('validatingAirlineCodes', ['N/A'])[0],
+                'amenities': [
+                    {
+                        'type': amenity.get('amenityType', 'Unknown'),
+                        'description': amenity.get('description', 'No description'),
+                        'is_chargeable': amenity.get('isChargeable', False)
                     }
-                    parsed_flights.append(flight_info)
+                    for amenity in segment.get('fareDetailsBySegment', [{}])[0].get('amenities', [])
+                ]
+            }
+            for offer in flight_data.get('data', [])
+            for itinerary in offer['itineraries']
+            for segment in itinerary['segments']
+        ]
 
         return {
             'total_results': flight_data.get('meta', {}).get('totalCount', 0),
