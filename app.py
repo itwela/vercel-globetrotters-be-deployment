@@ -314,6 +314,8 @@ def search_flights(access_token, city_from, city_to, departure_date, return_date
     except requests.exceptions.RequestException as e:
         print(f"Error searching flights: {e}")
         return None
+    
+# test
 
 @app.route('/search_flights', methods=['GET'])
 def search_flights_route():
