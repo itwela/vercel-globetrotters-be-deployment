@@ -24,7 +24,7 @@ AMADEUS_CLIENT_SECRET = os.getenv("AMADEUS_CLIENT_SECRET")
 NEW_GOOGLE_API_KEY = os.getenv("NEW_GOOGLE_API_KEY")
 genai.configure(api_key=NEW_GOOGLE_API_KEY)
 # model = genai.GenerativeModel('gemini-1.5-flash')
-model = genai.GenerativeModel('gemini-1.0-pro')
+model = genai.GenerativeModel('gemini-1.5-pro')
 
 
 
@@ -148,7 +148,6 @@ def generate_travel_guide():
                {"parameter":"numAdults", "value":"<value>"},
                {"parameter":"numChildren", "value":"<value>"},
                {"parameter":"numInfants", "value":"<value>"},
-               {"parameter":"baggage", "value":"<value>"},
                {"parameter":"isOneWay", "value":"<true/false>"},
                {"parameter":"budget", "value":"<value>"},
            ]}
@@ -157,7 +156,7 @@ def generate_travel_guide():
     Your name is Globetrotter Ai. If you introduce yourself to the user, use your name which is Globetrotter Ai. You are a travel booking assistant and are having a conversation with the user.YOUR GOAL IS TO SEARCH FOR FLIGHTS AND PROVIDE THEM TO THE USER.
     ONCE YOU HAVE ENOUGH INFORMATION YOU NEED TO START GIVING THE USER THE FLIGHT INFORMATION. IF YOU FOR SOME REASON ARE NOT ABLE TO, COMMUNICATE AND TRY AGAIN.
     EVERYTHING, THIS CONVERSATION IS SO THAT YOU CAN PROVIDE FLIGHTS BASED ON THE USER'S INFORMATION.  If they ask you a question, like recalling information they told you, it is your top priority to answer that question and get the answer correct. Listen.
-    If you do not see anything in the user prompt, please let the user know that you didnt quite hear them. No exceptions. Do not hallucinate. Stop talking about paris and actually listen to the user. 
+    If you do not see anything in the user prompt, please let the user know that you did'nt quite hear them. No exceptions. Do not hallucinate. Stop talking about paris and actually listen to the user. 
     You are just having a normal conversation and happen to be a travel planner. So be personable, make an effort to show the user you are paying attention. The users latest input is as following: "{user_input}".
     Use data from the conversation to output in the following JSON format. do not include formatting or code blocks.
     The user will be speaking to you in a conversation. Please infer the user's intent from the context and fill out the values in the json object based on the user's intent.
@@ -166,6 +165,7 @@ def generate_travel_guide():
     If the user is asking about the number of people traveling, please use the input to fill the 'numAdults', 'numChildren', and 'numInfants' parameters.
     Also, as you are having the conversation, If you update a value in the json object, please remember these values. Add them to your memory and send them
     every time you send a response along with the new values you discover in the conversation.
+    Also, stop asking if there is anything else you can help with. Your job is to update searched_flights, so do that. Use the infromation the user is giving you to do that. to do that Remember do not include formatting or code blocks!!!!!!!!!! SUPER IMPORTANT.
     {json.dumps(obj)}
     """
     try:
@@ -185,7 +185,6 @@ def generate_travel_guide():
         end_date = search_params.get('end_date')
         num_adults = search_params.get('numAdults')
         num_children = search_params.get('numChildren')
-        num_infants = search_params.get('numInfants')
         is_one_way = search_params.get('isOneWay', 'true') == 'true'
 
         # Ensure that required parameters are present
@@ -194,10 +193,9 @@ def generate_travel_guide():
             if not access_token:
                 return jsonify({'error': 'Unable to fetch access token'}), 500
 
-            # Convert parameters to integers if present
-            num_adults = int(num_adults) if num_adults else 1
-            num_children = int(num_children) if num_children else 0
-            num_infants = int(num_infants) if num_infants else 0
+            # Convert parameters to integers if present and not 'unknown'
+            num_adults = int(num_adults) if num_adults and num_adults != 'unknown' else 1
+            num_children = int(num_children) if num_children and num_children != 'unknown' else 0
 
             flight_data = search_flights(
                 access_token,
@@ -207,7 +205,6 @@ def generate_travel_guide():
                 return_date=end_date,
                 adults=num_adults,
                 children=num_children,
-                infants=num_infants,
                 is_one_way=is_one_way
             )
             response_json['searched_flights'] = flight_data if flight_data else {}
@@ -238,16 +235,14 @@ def get_access_token():
 
 def search_flights(access_token, city_from, city_to, departure_date, return_date=None, adults=1, children=0, infants=0, is_one_way=True):
     try:
+
         origin = get_airport_code(city_from)
         destination = get_airport_code(city_to)
-
-        print(f"Origin: {origin}, Destination: {destination}")  # Debug print
 
         if not origin or not destination:
             print("Error: Unable to retrieve airport codes")
             return None
 
-        # Format the dates
         formatted_departure_date = format_date(departure_date)
         formatted_return_date = format_date(return_date) if return_date else None
 
@@ -261,13 +256,10 @@ def search_flights(access_token, city_from, city_to, departure_date, return_date
             'departureDate': formatted_departure_date,
             'adults': adults,
             'children': children,
-            'infants': infants,
-            'max': 5 
+            'max': 5  
         }
         if not is_one_way and formatted_return_date:
             params['returnDate'] = formatted_return_date
-
-        print(f"Request Parameters: {params}")  # Debug print
 
         response = requests.get(
             'https://test.api.amadeus.com/v2/shopping/flight-offers',
@@ -276,12 +268,7 @@ def search_flights(access_token, city_from, city_to, departure_date, return_date
         )
         response.raise_for_status()
 
-        print(f"Flight API Response: {response.json()}")  # Debug print
-
-        flight_data = response.json()
-
-        parsed_flights = []
-        from itertools import chain
+        flight_data = response.json().get('data', [])
 
         parsed_flights = [
             {
@@ -290,35 +277,23 @@ def search_flights(access_token, city_from, city_to, departure_date, return_date
                 'arrival_time': segment['arrival']['at'],
                 'departure_airport': segment['departure']['iataCode'],
                 'arrival_airport': segment['arrival']['iataCode'],
-                'cabin': segment.get('cabin', 'N/A'),
                 'price': offer['price']['total'],
                 'currency': offer['price']['currency'],
                 'duration': itinerary['duration'],
-                'seat_type': segment['aircraft']['code'],
                 'airline': offer.get('validatingAirlineCodes', ['N/A'])[0],
-                'amenities': [
-                    {
-                        'type': amenity.get('amenityType', 'Unknown'),
-                        'description': amenity.get('description', 'No description'),
-                        'is_chargeable': amenity.get('isChargeable', False)
-                    }
-                    for amenity in segment.get('fareDetailsBySegment', [{}])[0].get('amenities', [])
-                ]
             }
-            for offer in flight_data.get('data', [])
+            for offer in flight_data
             for itinerary in offer['itineraries']
             for segment in itinerary['segments']
         ]
 
         return {
-            'total_results': flight_data.get('meta', {}).get('totalCount', 0),
+            'total_results': len(parsed_flights),
             'flights': parsed_flights
         }
     except requests.exceptions.RequestException as e:
         print(f"Error searching flights: {e}")
         return None
-    
-# test
 
 @app.route('/search_flights', methods=['GET'])
 def search_flights_route():
@@ -329,7 +304,6 @@ def search_flights_route():
     return_date = request.args.get('return_date')
     adults = request.args.get('adults', default=1, type=int)
     children = request.args.get('children', default=0, type=int)
-    infants = request.args.get('infants', default=0, type=int)
     is_one_way = request.args.get('is_one_way', default='true').lower() == 'true'
 
     access_token = get_access_token()
